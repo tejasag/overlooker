@@ -162,7 +162,7 @@ app.post("/event", async (req, res) => {
         (userData.profile.status_text === "" ||
           userData.profile.status_text.startsWith("Chatting in #")) &&
         (userData.profile.status_emoji === "" ||
-          userData.profile.status_emoji === ":tw_speech_balloon")
+          userData.profile.status_emoji === ":tw_speech_balloon:")
       ) {
         await fetch("https://slack.com/api/users.profile.set", {
           headers: {
