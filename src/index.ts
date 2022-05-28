@@ -148,26 +148,43 @@ app.post("/event", async (req, res) => {
         }
       ).then((res) => res.json());
       if (!channel.ok) return;
-      await fetch("https://slack.com/api/users.profile.set", {
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${data[0]["slack_token"]}`,
-        },
-        method: "POST",
-        body: JSON.stringify({
-          profile: {
-            status_text: `Chatting in #${channel?.channel.name}!`,
-            status_emoji: ":tw_speech_balloon:",
-            status_expiration:
-              new Date(new Date().getTime() + 10 * 60000).getTime() / 1000,
+      let userData = await fetch(
+        `https://slack.com/api/users.profile.get?user=${event.user}`,
+        {
+          headers: {
+            "Content-Type": "application/x-www-form-urlencoded",
+            Authorization: `Bearer ${data[0]["slack_token"]}`,
           },
-        }),
-      });
+          method: "GET",
+        }
+      ).then((res) => res.json());
+      if (
+        (userData.profile.status_text === "" ||
+          userData.profile.status_text.startsWith("Chatting in #")) &&
+        (userData.profile.status_emoji === "" ||
+          userData.profile.status_emoji === ":tw_speech_balloon")
+      ) {
+        await fetch("https://slack.com/api/users.profile.set", {
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${data[0]["slack_token"]}`,
+          },
+          method: "POST",
+          body: JSON.stringify({
+            profile: {
+              status_text: `Chatting in #${channel?.channel.name}!`,
+              status_emoji: ":tw_speech_balloon:",
+              status_expiration:
+                new Date(new Date().getTime() + 10 * 60000).getTime() / 1000,
+            },
+          }),
+        });
 
-      cache.users[data[0].user_id] = {
-        channel: event.channel,
-        latest_time: new Date().getTime(),
-      };
+        cache.users[data[0].user_id] = {
+          channel: event.channel,
+          latest_time: new Date().getTime(),
+        };
+      }
     }
   }
   res.status(404);
