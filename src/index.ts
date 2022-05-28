@@ -101,7 +101,7 @@ app.get("/slack", async (req, res) => {
 });
 
 app.post("/event", async (req, res) => {
-  console.log(req);
+  console.log(req.body);
   if (req.body.challenge) return res.send(req.body.challenge).status(200);
 
   const { event } = req.body;
