@@ -138,6 +138,8 @@ app.post("/event", async (req, res) => {
   if (data === null || data.length === 0)
     return res.send(`User not found in database.`).status(404);
 
+  console.log(`User found in database: ${event.user}`);
+
   let channel = await fetch(
     `https://slack.com/api/conversations.info?channel=${event.channel}`,
     {
@@ -149,8 +151,10 @@ app.post("/event", async (req, res) => {
     }
   ).then((res) => res.json());
 
-  if (!channel.ok)
+  if (!channel.ok) {
+    console.error(`Channel not found: ${event.channel}`);
     return res.send(`Channel not found. ${channel.error}`).status(404);
+  }
 
   let userData = await fetch(
     `https://slack.com/api/users.profile.get?user=${event.user}`,
@@ -190,6 +194,9 @@ app.post("/event", async (req, res) => {
         },
       }),
     });
+    console.log(
+      `Updated profile for user: ${event.user} in channel: ${event.channel}`
+    );
 
     cache.users[data[0].user_id] = {
       channel: event.channel,
