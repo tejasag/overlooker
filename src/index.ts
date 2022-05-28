@@ -101,17 +101,17 @@ app.get("/slack", async (req, res) => {
 });
 
 app.post("/event", async (req, res) => {
-  console.log(req.body);
-  if (req.body.challenge) return res.send(req.body.challenge).status(200);
+  if (req.body.challenge) return res.status(200).send(req.body.challenge);
 
   const { event } = req.body;
 
-  if (event.type != "message") return res.status(400);
+  if (event.type != "message")
+    return res.status(400).send(`Event type is not message.`);
   if (
     req.body.event_id === cache.event_id ||
     req.body.event_time < cache.event_time
   )
-    return res.status(200);
+    return res.status(200).send(`Old message's event triggered.`);
 
   cache.event_id = req.body.event_id;
   cache.event_time = req.body.event_time;
@@ -121,8 +121,9 @@ app.post("/event", async (req, res) => {
     cache.users[event.user] &&
     cache.users[event.user].channel === event.channel &&
     new Date().getTime() - cache.users[event.user].latest_time < 3 * 60000
-  )
-    return res.status(200);
+  ) {
+    return res.status(200).send(`Request accepted but not acted upon`);
+  }
 
   const { data, error } = await supabase
     .from("users")
@@ -132,12 +133,12 @@ app.post("/event", async (req, res) => {
   if (error) {
     console.error(error);
     return res
-      .send(`Error while fetching user from database. ${error}`)
-      .status(404);
+      .status(404)
+      .send(`Error while fetching user from database. ${error}`);
   }
 
   if (data === null || data.length === 0)
-    return res.send(`User not found in database.`).status(404);
+    return res.status(404).send(`User not found in database.`);
 
   console.log(`User found in database: ${event.user}`);
 
@@ -154,7 +155,7 @@ app.post("/event", async (req, res) => {
 
   if (!channel.ok) {
     console.error(`Channel not found: ${event.channel}`);
-    return res.send(`Channel not found. ${channel.error}`).status(404);
+    return res.status(404).send(`Channel not found. ${channel.error}`);
   }
 
   let userData = await fetch(
@@ -170,7 +171,7 @@ app.post("/event", async (req, res) => {
 
   if (userData.error) {
     console.log("Error finding user: " + event.user);
-    return res.send(`User not found. ${event.user}`).status(404);
+    return res.status(404).send(`User not found. ${event.user}`);
   }
 
   if (
@@ -203,9 +204,8 @@ app.post("/event", async (req, res) => {
       channel: event.channel,
       latest_time: new Date().getTime(),
     };
-    return res.send(`Update successful`).status(200);
-  } else return res.status(400);
-  res.status(400);
+    return res.status(200).send(`Update successful`);
+  } else return res.status(400).send(`User profile already set.`);
 });
 
 app.listen(process.env.PORT ?? 3000, () => {
