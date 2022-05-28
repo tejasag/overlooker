@@ -105,98 +105,98 @@ app.post("/event", async (req, res) => {
 
   const { event } = req.body;
 
-  if (event.type === "message") {
-    // To prevent duplicate calls of the same event
-    if (
-      req.body.event_id === cache.event_id ||
-      req.body.event_time < cache.event_time
-    )
-      return;
+  if (event.type != "message") return res.status(400);
+  if (
+    req.body.event_id === cache.event_id ||
+    req.body.event_time < cache.event_time
+  )
+    return res.status(200);
 
-    cache.event_id = req.body.event_id;
-    cache.event_time = req.body.event_time;
+  cache.event_id = req.body.event_id;
+  cache.event_time = req.body.event_time;
 
-    const { data, error } = await supabase
-      .from("users")
-      .select()
-      .eq("user_id", event.user);
+  // If the message was sent within 3 minutes of the last message from the user, do nothing.
+  if (
+    cache.users[event.user] &&
+    cache.users[event.user].channel === event.channel &&
+    new Date().getTime() - cache.users[event.user].latest_time < 3 * 60000
+  )
+    return res.status(200);
 
-    if (error) {
-      console.error(error);
-      return;
-    }
+  const { data, error } = await supabase
+    .from("users")
+    .select()
+    .eq("user_id", event.user);
 
-    if (data === null || data.length === 0) return;
-    if (data.length > 0) {
-      // If the message was sent within 3 minutes of the last message from the user, do nothing.
-      if (
-        cache.users[event.user] &&
-        cache.users[event.user].channel === event.channel &&
-        new Date().getTime() - cache.users[event.user].latest_time < 3 * 60000
-      ) {
-        return;
-      }
-
-      let channel = await fetch(
-        `https://slack.com/api/conversations.info?channel=${event.channel}`,
-        {
-          headers: {
-            "Content-Type": "application/x-www-form-urlencoded",
-            Authorization: `Bearer ${data[0]["slack_token"]}`,
-          },
-          method: "GET",
-        }
-      ).then((res) => res.json());
-
-      if (!channel.ok) return;
-
-      let userData = await fetch(
-        `https://slack.com/api/users.profile.get?user=${event.user}`,
-        {
-          headers: {
-            "Content-Type": "application/x-www-form-urlencoded",
-            Authorization: `Bearer ${data[0]["slack_token"]}`,
-          },
-          method: "GET",
-        }
-      ).then((res) => res.json());
-
-      if (userData.error) {
-        console.log("Error finding user: " + event.user);
-        return res.status(404);
-      }
-
-      if (
-        userData.profile &&
-        (userData.profile.status_text === "" ||
-          userData.profile.status_text.startsWith("Chatting in #")) &&
-        (userData.profile.status_emoji === "" ||
-          userData.profile.status_emoji === ":tw_speech_balloon:")
-      ) {
-        await fetch("https://slack.com/api/users.profile.set", {
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${data[0]["slack_token"]}`,
-          },
-          method: "POST",
-          body: JSON.stringify({
-            profile: {
-              status_text: `Chatting in #${channel?.channel.name}!`,
-              status_emoji: ":tw_speech_balloon:",
-              status_expiration:
-                new Date(new Date().getTime() + 10 * 60000).getTime() / 1000,
-            },
-          }),
-        });
-
-        cache.users[data[0].user_id] = {
-          channel: event.channel,
-          latest_time: new Date().getTime(),
-        };
-      } else return res.status(404);
-    }
+  if (error) {
+    console.error(error);
+    return res
+      .send(`Error while fetching user from database. ${error}`)
+      .status(404);
   }
-  res.status(404);
+
+  if (data === null || data.length === 0)
+    return res.send(`User not found in database.`).status(404);
+
+  let channel = await fetch(
+    `https://slack.com/api/conversations.info?channel=${event.channel}`,
+    {
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded",
+        Authorization: `Bearer ${data[0]["slack_token"]}`,
+      },
+      method: "GET",
+    }
+  ).then((res) => res.json());
+
+  if (!channel.ok)
+    return res.send(`Channel not found. ${channel.error}`).status(404);
+
+  let userData = await fetch(
+    `https://slack.com/api/users.profile.get?user=${event.user}`,
+    {
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded",
+        Authorization: `Bearer ${data[0]["slack_token"]}`,
+      },
+      method: "GET",
+    }
+  ).then((res) => res.json());
+
+  if (userData.error) {
+    console.log("Error finding user: " + event.user);
+    return res.send(`User not found. ${event.user}`).status(404);
+  }
+
+  if (
+    userData.profile &&
+    (userData.profile.status_text === "" ||
+      userData.profile.status_text.startsWith("Chatting in #")) &&
+    (userData.profile.status_emoji === "" ||
+      userData.profile.status_emoji === ":tw_speech_balloon:")
+  ) {
+    await fetch("https://slack.com/api/users.profile.set", {
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${data[0]["slack_token"]}`,
+      },
+      method: "POST",
+      body: JSON.stringify({
+        profile: {
+          status_text: `Chatting in #${channel?.channel.name}!`,
+          status_emoji: ":tw_speech_balloon:",
+          status_expiration:
+            new Date(new Date().getTime() + 10 * 60000).getTime() / 1000,
+        },
+      }),
+    });
+
+    cache.users[data[0].user_id] = {
+      channel: event.channel,
+      latest_time: new Date().getTime(),
+    };
+  } else return res.status(400);
+  res.status(400);
 });
 
 app.listen(process.env.PORT ?? 3000, () => {
