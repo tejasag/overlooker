@@ -62,7 +62,11 @@ app.get("/slack", async (req, res) => {
   }
 
   const auth = await fetch(
-    `https://slack.com/api/oauth.v2.access?code=${req.query.code}&client_id=${process.env.SLACK_CLIENT_ID}&client_secret=${process.env.SLACK_CLIENT_SECRET}`,
+    `https://slack.com/api/oauth.v2.access?code=${req.query.code}&client_id=${
+      process.env.SLACK_CLIENT_ID
+    }&client_secret=${process.env.SLACK_CLIENT_SECRET}&redirect_uri=${
+      process.env.HOST ?? "http://localhost:3000"
+    }/slack`,
     {
       headers: {
         "Content-Type": "application/x-www-form-urlencoded",
