@@ -239,6 +239,7 @@ app.listen(process.env.PORT ?? 3000, async () => {
 });
 
 async function handleInstantDelete(req: any, res: any, event: any, data: any) {
+  if (!event.text.match(/[d*]/gi)) return res.status(404).send("not found ;-;");
   let messagesToDelete =
     event.text.match(/[d*]/gi).length > 5
       ? 5
