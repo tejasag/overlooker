@@ -5,6 +5,7 @@
   "license": "MIT",
   "scripts": {
     "build": "tsc",
+    "start": "node dist/index.js",
     "dev": "tsc && nodemon dist/index.js",
     "ts-dev": "tsc --watch"
   },
