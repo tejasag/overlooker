@@ -169,7 +169,7 @@ app.post("/event", async (req, res) => {
   res.status(404);
 });
 
-app.listen(3000, () => {
+app.listen(process.env.POST ?? 3000, () => {
   console.log(
     `🚀 Server ready at: ${process.env.HOST ?? "http://localhost:3000"}`
   );
