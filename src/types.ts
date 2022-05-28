@@ -20,6 +20,9 @@ export interface Cache {
     [id: string]: {
       channel: string;
       latest_time: number;
+      latest_delete_time: number;
+      token: string;
+      id: string;
     };
   };
 }

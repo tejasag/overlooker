@@ -3,11 +3,12 @@ import fetch from "node-fetch";
 import { engine } from "express-handlebars";
 import { urlencoded } from "body-parser";
 import path from "path";
-import { createClient } from "@supabase/supabase-js";
+import { createClient, User } from "@supabase/supabase-js";
 
 import { SlackAuthResponse, Cache } from "./types";
 
 import dotenv from "dotenv";
+import { WebClient } from "@slack/web-api";
 dotenv.config();
 
 const environmentVariables = [
@@ -94,6 +95,20 @@ app.get("/slack", async (req, res) => {
           slack_token: authJson.authed_user.access_token,
         },
       ]);
+      cache.users[authJson.authed_user.id] = {
+        channel: "",
+        latest_time: 0,
+        latest_delete_time: 0,
+        token: authJson.authed_user.access_token,
+        id: authJson.authed_user.id,
+      };
+    } else {
+      await supabase
+        .from("users")
+        .update({ slack_token: authJson.authed_user.access_token })
+        .eq("user_id", authJson.authed_user.id);
+      cache.users[authJson.authed_user.id].token =
+        authJson.authed_user.access_token;
     }
   }
 
@@ -107,38 +122,35 @@ app.post("/event", async (req, res) => {
 
   if (event.type != "message")
     return res.status(400).send(`Event type is not message.`);
+
   if (
     req.body.event_id === cache.event_id ||
     req.body.event_time < cache.event_time
   )
     return res.status(200).send(`Old message's event triggered.`);
-
   cache.event_id = req.body.event_id;
   cache.event_time = req.body.event_time;
+
+  if (!cache.users[event.user])
+    return res.status(404).send(`User has not authorized.`);
+
+  if (event.text.match(/^[dD]*$/gi)) {
+    if (
+      cache.users[event.user] &&
+      new Date().getTime() - cache.users[event.user].latest_delete_time <
+        30 * 1000
+    )
+      return res.status(200).send("Ratelimited");
+    return await handleInstantDelete(req, res, event, cache.users[event.user]);
+  }
 
   // If the message was sent within 3 minutes of the last message from the user, do nothing.
   if (
     cache.users[event.user] &&
     cache.users[event.user].channel === event.channel &&
-    new Date().getTime() - cache.users[event.user].latest_time < 3 * 60000
-  ) {
+    new Date().getTime() - cache.users[event.user].latest_time < 10 * 60000
+  )
     return res.status(200).send(`Request accepted but not acted upon`);
-  }
-
-  const { data, error } = await supabase
-    .from("users")
-    .select()
-    .eq("user_id", event.user);
-
-  if (error) {
-    console.error(error);
-    return res
-      .status(404)
-      .send(`Error while fetching user from database. ${error}`);
-  }
-
-  if (data === null || data.length === 0)
-    return res.status(404).send(`User not found in database.`);
 
   console.log(`User found in database: ${event.user}`);
 
@@ -147,7 +159,7 @@ app.post("/event", async (req, res) => {
     {
       headers: {
         "Content-Type": "application/x-www-form-urlencoded",
-        Authorization: `Bearer ${data[0]["slack_token"]}`,
+        Authorization: `Bearer ${cache.users[event.user]["token"]}`,
       },
       method: "GET",
     }
@@ -163,7 +175,7 @@ app.post("/event", async (req, res) => {
     {
       headers: {
         "Content-Type": "application/x-www-form-urlencoded",
-        Authorization: `Bearer ${data[0]["slack_token"]}`,
+        Authorization: `Bearer ${cache.users[event.user]["token"]}`,
       },
       method: "GET",
     }
@@ -184,7 +196,7 @@ app.post("/event", async (req, res) => {
     await fetch("https://slack.com/api/users.profile.set", {
       headers: {
         "Content-Type": "application/json",
-        Authorization: `Bearer ${data[0]["slack_token"]}`,
+        Authorization: `Bearer ${cache.users[event.user].token}`,
       },
       method: "POST",
       body: JSON.stringify({
@@ -200,16 +212,97 @@ app.post("/event", async (req, res) => {
       `Updated profile for user: ${event.user} in channel: ${event.channel}`
     );
 
-    cache.users[data[0].user_id] = {
-      channel: event.channel,
-      latest_time: new Date().getTime(),
-    };
+    cache.users[event.user].channel = event.channel;
+    cache.users[event.user].latest_time = new Date().getTime();
     return res.status(200).send(`Update successful`);
   } else return res.status(400).send(`User profile already set.`);
 });
 
-app.listen(process.env.PORT ?? 3000, () => {
+app.listen(process.env.PORT ?? 3000, async () => {
   console.log(
     `🚀 Server ready at: ${process.env.HOST ?? "http://localhost:3000"}`
   );
+
+  let { data, error } = await supabase.from("users").select();
+  if (error) console.error(`Error while caching users: ${error}`);
+  else
+    data?.map(
+      (user: any) =>
+        (cache.users[user.user_id] = {
+          id: user.user_id,
+          channel: "",
+          latest_time: 0,
+          latest_delete_time: 0,
+          token: user.slack_token,
+        })
+    );
 });
+
+async function handleInstantDelete(req: any, res: any, event: any, data: any) {
+  let messagesToDelete =
+    event.text.match(/[d*]/gi).length > 5
+      ? 5
+      : event.text.match(/[d*]/gi).length;
+  let messages: any[] = [];
+
+  let history = await fetch(
+    `https://slack.com/api/conversations.history?channel=${req.body.event.channel}`,
+    {
+      method: "GET",
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded",
+        Authorization: `Bearer ${data.token}`,
+      },
+    }
+  ).then((res) => res.json());
+  if (!history.ok) {
+    console.error(history.error);
+    return res
+      .status(404)
+      .send(`Channel history not available. ${history.error}`);
+  }
+
+  let slack = new WebClient(data.token);
+
+  async function collectReplies(channel: string, thread_ts: string) {
+    let replies: any[] = [];
+    async function getNext(cursor: string | undefined) {
+      const history = await slack.conversations.replies({
+        channel: channel,
+        ts: thread_ts,
+        cursor: cursor,
+      });
+      replies.push(...(history.messages as any[]));
+    }
+    await getNext(undefined);
+    return replies.reverse();
+  }
+
+  if (!event.thread_ts) {
+    history.messages.map((i: any) =>
+      i.user === event.user ? messages.push(i) : null
+    );
+    messages = messages.slice(0, messagesToDelete + 1);
+  } else {
+    messages = await collectReplies(event.channel, event.thread_ts);
+    messages = messages
+      .filter((i) => i.user === event.user)
+      .slice(0, messagesToDelete + 1);
+  }
+
+  for (let message of messages) {
+    try {
+      await slack.chat.delete({
+        channel: event.channel,
+        ts: message.ts,
+        as_user: true,
+      });
+    } catch (error) {
+      console.log(error);
+    }
+  }
+  cache.users[event.user].latest_delete_time = new Date().getTime();
+  cache.users[event.user].latest_time = new Date().getTime();
+
+  return res.status(200).send("Succesful");
+}
