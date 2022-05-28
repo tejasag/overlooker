@@ -203,6 +203,7 @@ app.post("/event", async (req, res) => {
       channel: event.channel,
       latest_time: new Date().getTime(),
     };
+    return res.send(`Update successful`).status(200);
   } else return res.status(400);
   res.status(400);
 });
