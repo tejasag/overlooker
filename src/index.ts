@@ -48,7 +48,7 @@ app.engine(
   })
 );
 
-app.get("/", (req, res) => {
+app.get("/", (_req, res) => {
   res.render("main", {
     slackClientID: process.env.SLACK_CLIENT_ID,
     host: process.env.HOST ?? "http://localhost:3000",
