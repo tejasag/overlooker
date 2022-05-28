@@ -101,10 +101,10 @@ app.get("/slack", async (req, res) => {
 });
 
 app.post("/event", async (req, res) => {
-  if (req.body.challenge) {
-    return res.send(req.body.challenge).status(200);
-  }
+  if (req.body.challenge) return res.send(req.body.challenge).status(200);
+
   const { event } = req.body;
+
   if (event.type === "message") {
     // To prevent duplicate calls of the same event
     if (
@@ -112,6 +112,7 @@ app.post("/event", async (req, res) => {
       req.body.event_time < cache.event_time
     )
       return;
+
     cache.event_id = req.body.event_id;
     cache.event_time = req.body.event_time;
 
@@ -119,15 +120,14 @@ app.post("/event", async (req, res) => {
       .from("users")
       .select()
       .eq("user_id", event.user);
+
     if (error) {
       console.error(error);
       return;
     }
-    if (data.length > 0) {
-      if (data === null || data.length === 0) {
-        return;
-      }
 
+    if (data === null || data.length === 0) return;
+    if (data.length > 0) {
       // If the message was sent within 3 minutes of the last message from the user, do nothing.
       if (
         cache.users[event.user] &&
@@ -147,7 +147,9 @@ app.post("/event", async (req, res) => {
           method: "GET",
         }
       ).then((res) => res.json());
+
       if (!channel.ok) return;
+
       let userData = await fetch(
         `https://slack.com/api/users.profile.get?user=${event.user}`,
         {
@@ -158,7 +160,14 @@ app.post("/event", async (req, res) => {
           method: "GET",
         }
       ).then((res) => res.json());
+
+      if (userData.error) {
+        console.log("Error finding user: " + event.user);
+        return res.status(404);
+      }
+
       if (
+        userData.profile &&
         (userData.profile.status_text === "" ||
           userData.profile.status_text.startsWith("Chatting in #")) &&
         (userData.profile.status_emoji === "" ||
@@ -184,7 +193,7 @@ app.post("/event", async (req, res) => {
           channel: event.channel,
           latest_time: new Date().getTime(),
         };
-      }
+      } else return res.status(404);
     }
   }
   res.status(404);
