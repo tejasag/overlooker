@@ -93,6 +93,7 @@ app.get("/slack", async (req, res) => {
         {
           user_id: authJson.authed_user.id,
           slack_token: authJson.authed_user.access_token,
+          blacklist: [],
         },
       ]);
       cache.users[authJson.authed_user.id] = {
@@ -101,6 +102,7 @@ app.get("/slack", async (req, res) => {
         latest_delete_time: 0,
         token: authJson.authed_user.access_token,
         id: authJson.authed_user.id,
+        blacklist: [],
       };
     } else {
       await supabase
@@ -144,11 +146,15 @@ app.post("/event", async (req, res) => {
     return await handleInstantDelete(req, res, event, cache.users[event.user]);
   }
 
+  if(cache.users[event.user].blacklist?.indexOf(event.channel) != -1){
+      return res.status(404).end();
+  }
+
   // If the message was sent within 3 minutes of the last message from the user, do nothing.
   if (
     cache.users[event.user] &&
     cache.users[event.user].channel === event.channel &&
-    new Date().getTime() - cache.users[event.user].latest_time < 10 * 60000
+    new Date().getTime() - cache.users[event.user].latest_time < 3 * 60000
   )
     return res.status(200).send(`Request accepted but not acted upon`);
 
@@ -218,6 +224,25 @@ app.post("/event", async (req, res) => {
   } else return res.status(400).send(`User profile already set.`);
 });
 
+app.post("/commands/blacklist-channels", async (req, res) => {
+    let args = req.body.text.split(" ");
+    if(!args[0].match(/<#(.+?)>/g)){
+        return res.status(200).send("Invalid channel. Please mention a valid channel");
+    }
+
+    let channel = args[0].match(/<#(.+?)>/)[1].split("|")[0];
+    let {data, error}= await supabase.from("users").select().eq("user_id", req.body.user_id);
+    if(error){
+        res.status(200).send(`Error occured ${error}`);
+    }
+    let ch = data?.[0].blacklist === null ? [] : data?.[0].blacklist;
+    await supabase.from("users").update({blacklist: [...ch, channel]}).eq("user_id", req.body.user_id);
+    cache.users[req.body.user_id].blacklist?.push(channel);
+
+    res.status(200).end("Done!");
+});
+
+
 app.listen(process.env.PORT ?? 3000, async () => {
   console.log(
     `🚀 Server ready at: ${process.env.HOST ?? "http://localhost:3000"}`
@@ -234,6 +259,7 @@ app.listen(process.env.PORT ?? 3000, async () => {
           latest_time: 0,
           latest_delete_time: 0,
           token: user.slack_token,
+          blacklist: user.blacklist === null ? [] : user.blacklist,
         })
     );
 });

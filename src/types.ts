@@ -23,6 +23,7 @@ export interface Cache {
       latest_delete_time: number;
       token: string;
       id: string;
+      blacklist?: string[];
     };
   };
 }
